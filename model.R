@@ -42,37 +42,49 @@ ExchangeHistory = R6Class(
 ExchangePair = R6Class(
      "ExchangePair",
      public = list(
+          #actors 
           i = NA,
           j = NA,
-          p = NA,
-          isValid = TRUE,
-          #demand issue of i
-          q = NA,
-          #demand issue of j
           
+          #demand issue of i
+          p = NA,
+          #demand issue of j
+          q = NA,
+          
+          #starting postions 
+          xip = NA,
+          xiq = NA,
+          xjp = NA,
+          xjq = NA,
+          
+          #suppy issues 
           supply_i = NA,
           supply_j = NA,
           
+          #exchange rates 
           dp = NA,
           dq = NA,
           
+          #moves 
           move_j = NA,
           move_i = NA,
           
+          #new positions 
           yiq = NA,
           yjp = NA,
           
+          #gains 
           eu_i = NA,
           eu_j = NA,
           gain = NA,
+          
+          #booleans 
           recalc = FALSE,
-          
-          model = NA,
-          
-          original_i = NA,
-          original_j = NA,
-          
+          isValid = TRUE,
           isSwitched = FALSE,
+          
+          #Model reference 
+          model = NA,
           
           initialize = function(i, j, p, q, model) {
                self$model = model
@@ -82,9 +94,6 @@ ExchangePair = R6Class(
                
                self$supply_i = q
                self$supply_j = p
-               
-               self$original_i = model$xMatrix[q, i]
-               self$original_j = model$xMatrix[p, j]
                
                #test if condition 2 holds
                if ((model$sMatrix[p, i] / model$sMatrix[q, i]) < (model$sMatrix[p, j] / model$sMatrix[q, j])) {
@@ -96,16 +105,24 @@ ExchangePair = R6Class(
                     self$i = i
                     self$j = j
                }
+               
+               self$initPositionFromModel()
           },
-          
+          initPositionFromModel = function()
+          {
+               self$xip = self$model$dMatrix[self$p, self$i]
+               self$xiq = self$model$xMatrix[self$q, self$i]
+               self$xjp = self$model$xMatrix[self$p, self$j]
+               self$xjq = self$model$dMatrix[self$q, self$j]
+          },
           calculate = function() {
                private$is_J = TRUE
                
                self$exchangeRatioP()
                self$exchangeRatioQ()
                
+               #TODO: remove debug code 
                #India	mrv	EU28	legal
-               
                if (self$i == "Russia" && self$j == "LDCs_BGD")
                {
                     # browser()
@@ -114,6 +131,10 @@ ExchangePair = R6Class(
                #compare the calculated shift with the maximum shift, if it exceeds, calculate with the maximum
                self$move_i = self$getShift_I()
                self$move_j = self$getShift_J()
+               
+               #calculate the gains
+               self$eu_i = private$EU_I()
+               self$eu_j = private$EU_J()
                
                private$is_J = FALSE
                
@@ -128,6 +149,7 @@ ExchangePair = R6Class(
                     #should never happen
                     if (self$move_j > self$getShift_J())
                          stop("Unreachable state: both shift exceed the maximum interval")
+                    
                }
                else
                {
@@ -135,9 +157,9 @@ ExchangePair = R6Class(
                }
                
                # correct the direction
-               if (self$model$xMatrix[self$p, self$i] < self$model$xMatrix[self$p, self$j])
+               if (self$xip < self$xjp)
                     self$move_j = self$move_j * -1
-               if (self$model$xMatrix[self$q, self$j] < self$model$xMatrix[self$q, self$i])
+               if (self$xjq < self$xiq)
                     self$move_i = self$move_i * -1
                
                #calculate the gains
@@ -155,21 +177,46 @@ ExchangePair = R6Class(
                bMoveJ = self$model$hMatrix[[paste0(self$p, self$j)]]$isValidMove(self$move_j)
                bMoveI = self$model$hMatrix[[paste0(self$q, self$i)]]$isValidMove(self$move_i)
                
-               if (bMoveJ != TRUE || bMoveI != TRUE)
+               if (self$move_i == 0 || self$move_j == 0)
                {
                     self$isValid = FALSE
                }
                
+               if (bMoveJ != TRUE || bMoveI != TRUE)
+               {
+                    self$isValid = FALSE
+               }
           },
           recalculate = function() {
                self$recalc = TRUE
                
-               if (self$i == "EIG" && self$q == "legal" && self$j == "Russia" && self$p == "mrv")
+               if (self$i == "Brazil" &&
+                   self$q == "legal" && self$j == "EIG" && self$p == "mrv")
                {
-                    #browser()
+                    browser()
                }
                
-               self$calculate()
+               dsi = self$model$demandSupplyIssue
+               
+               b1 = dsi[self$supply_i, self$i] == "SUPPLY"
+               #b2 = is.na(dsi[self$supply_i, self$i])
+               b3 = dsi[self$supply_j, self$j] == "SUPPLY"
+               #b4 = is.na(dsi[self$supply_j, self$j])
+               
+               # wanneer mogen we door? is hij leeg is, of als hij supply is dus of b1 of b2
+               
+               # both are na or both are SUPPLY
+               if ( (is.na(b1) || b1 == TRUE) && (is.na(b3) || b3 == TRUE) )
+               {
+                    self$initPositionFromModel()
+                    self$calculate()
+               }
+               else
+               {
+                    self$isValid = FALSE
+                    self$gain = 0
+               }
+               
           },
           exchangeRatioP = function() {
                if (private$is_J == FALSE)
@@ -198,7 +245,7 @@ ExchangePair = R6Class(
                }
           },
           getShift_I = function() {
-               x = self$model$xMatrix
+               #x = self$model$xMatrix
                
                if (private$is_J == TRUE) {
                     return(private$reverseMove(
@@ -208,7 +255,7 @@ ExchangePair = R6Class(
                     ))
                }
                else
-                    return(abs(x[self$supply_i, self$i] - x[self$supply_i, self$j]))
+                    return(abs(self$xiq - self$xjq))
                
           },
           getShift_J = function() {
@@ -222,23 +269,23 @@ ExchangePair = R6Class(
                     ))
                }
                else
-                    return(abs(x[self$supply_j, self$i] - x[self$supply_j, self$j]))
+                    return(abs(self$xip - self$xjp))
           },
           asList = function()
           {
-               x = self$model$xMatrix
+               #x = self$model$xMatrix
                
-                    i = self$i
-                    j = self$j
-                    
-                    p = self$p
-                    q = self$q
-                    
-                    move_i = self$move_i
-                    move_j = self$move_j
-                    
-                    yiq = self$yiq
-                    yjp = self$yjp
+               i = self$i
+               j = self$j
+               
+               p = self$p
+               q = self$q
+               
+               move_i = self$move_i
+               move_j = self$move_j
+               
+               yiq = self$yiq
+               yjp = self$yjp
                
                
                l = list(
@@ -247,14 +294,14 @@ ExchangePair = R6Class(
                     j,
                     p,
                     self$gain,
-                    x[q, i],
+                    self$xiq,
                     move_i,
                     yiq,
-                    x[q, j],
-                    x[p, j],
+                    self$xjq,
+                    self$xjp,
                     move_j,
                     yjp,
-                    x[p, i],
+                    self$xip,
                     self$recalc
                )
                
@@ -275,7 +322,7 @@ ExchangePair = R6Class(
                s = self$model$sMatrix
                x = self$model$xMatrix
                
-               dp = (abs(x[p, i] - x[p, j]) * s[p, j] * c[p, j])  / sum(c[p, ] * s[p, ], na.rm = TRUE)
+               dp = (abs(self$model$dMatrix[p, i] - x[p, j]) * s[p, j] * c[p, j])  / sum(c[p,] * s[p,], na.rm = TRUE)
                
                return(dp)
           },
@@ -301,7 +348,7 @@ ExchangePair = R6Class(
                c = self$model$cMatrix
                s = self$model$sMatrix
                
-               return((exchange_ratio * sum(c[q, ] * s[q, ], na.rm = TRUE)) /  (c[q, i] * s[q, i]))
+               return((exchange_ratio * sum(c[q,] * s[q,], na.rm = TRUE)) /  (c[q, i] * s[q, i]))
                
           },
           oppositeActor = function(actor) {
@@ -358,11 +405,12 @@ EqualGainModel <- R6Class(
           sMatrix = NA,
           #salience
           xMatrix = NA,
-          #position
-          xSupplyMatrix = NA,
-          #position
-          hMatrix = NA,
           #history
+          dMatrix = NA,
+          #history
+          hMatrix = NA,
+          demandSupplyIssue = NA,
+          #position
           actors = NA,
           #list of all the actors anvailable
           issues = NA,
@@ -370,7 +418,7 @@ EqualGainModel <- R6Class(
           issuePairs = NA,
           exchangeState = NA,
           #2xn list of all pairs of issues
-          initialize = function(actors, issues, c, s, x, h)
+          initialize = function(actors, issues, c, s, x, dsi, h)
           {
                self$actors = actors
                self$issues = issues
@@ -378,10 +426,12 @@ EqualGainModel <- R6Class(
                # all combinations of the topics
                self$issuePairs = combn(self$issues, 2)
                
+               self$demandSupplyIssue = dsi
+               
                self$cMatrix = c
                self$sMatrix = s
                self$xMatrix = x
-               self$xSupplyMatrix = x
+               self$dMatrix = x
                self$hMatrix = h
                
                self$exchangeState = matrix(
@@ -555,6 +605,9 @@ CSVParser <- R6Class(
                xPostionMatrix = private$initMatrix(issues, actors)
                salienceMatrix = private$initMatrix(issues, actors)
                cPowerMatrix = private$initMatrix(issues, actors)
+               
+               demandSupplyIssue = private$initMatrix(issues, actors)
+               
                historyMatrix = hash()
                # parse all the values for each actor on each issue.
                for (i in 1:nrow(input))
@@ -585,6 +638,7 @@ CSVParser <- R6Class(
                          cPowerMatrix,
                          salienceMatrix,
                          xPostionMatrix,
+                         demandSupplyIssue,
                          historyMatrix
                     )
                )
@@ -604,93 +658,94 @@ CSVParser <- R6Class(
 )
 
 
-filename = "data_short"
-
+#filename = "data_short"
+filename = "CoP21"
 p = CSVParser$new(paste0("data/", filename, ".csv"))
 
 model = p$parse()
 
-exchanges = model$calculatePairs()
-
-realized = list()
-
-while (length(exchanges) > 0)
-{
-     best = exchanges[[1]]
-     exchanges = exchanges[-1]
+# for (iteration in 1:10)
+# {
+     exchanges = model$calculatePairs()
      
-     if (best$isValid)
+     realized = list()
+     
+     while (length(exchanges) > 0)
      {
-          
-          nBest = list()
-          
-          for (exchange in exchanges)
-          {
-               if (exchange$isValid)
-               {
-                    if (exchange$gain > best$gain)
-                    {
-                         #if the gain is higher the replace the best and add the previous best to the list
-                         nBest = c(nBest, best)
-                         best = exchange
-                    }
-                    else
-                    {
-                         if (exchange$gain != 0)
-                         {
-                              nBest = c(nBest, exchange)
-                         }
-                    }
-               }
-          }
+          best = exchanges[[1]]
+          exchanges = exchanges[-1]
           
           if (best$isValid)
           {
-               realized = c(realized, best$asList())
+               nBest = list()
                
-               model$xMatrix[best$supply_i, best$i] = best$yiq
-               model$xMatrix[best$supply_j, best$j] = best$yjp
-               
-               for (ex in nBest)
+               for (exchange in exchanges)
                {
-                    if ((ex$i == best$i &&
-                         ex$supply_i == best$supply_i) ||
-                        (ex$j == best$i && ex$supply_j == best$supply_i))
+                    if (exchange$isValid)
                     {
-                         ex$recalculate()
-                    }
-                    
-                    if ((ex$j == best$j &&
-                         ex$supply_j == best$supply_j) ||
-                        (ex$i == best$j && ex$supply_i == best$supply_j))
-                    {
-                         ex$recalculate()
+                         if (exchange$gain > best$gain)
+                         {
+                              #if the gain is higher the replace the best and add the previous best to the list
+                              nBest = c(nBest, best)
+                              best = exchange
+                         }
+                         else
+                         {
+                              if (exchange$gain != 0)
+                              {
+                                   nBest = c(nBest, exchange)
+                              }
+                         }
                     }
                }
                
-               exchanges = nBest
+               if (best$isValid)
+               {
+                    realized = c(realized, best$asList())
+                    
+                    model$demandSupplyIssue[best$supply_i, best$i] = "SUPPLY";
+                    model$demandSupplyIssue[best$supply_i, best$j] = "DEMAND";
+                    model$demandSupplyIssue[best$supply_j, best$i] = "DEMAND";
+                    model$demandSupplyIssue[best$supply_j, best$j] = "SUPPLY";
+                    
+                    model$xMatrix[best$supply_i, best$i] = best$yiq
+                    model$xMatrix[best$supply_j, best$j] = best$yjp
+                    
+                    for (ex in nBest)
+                    {
+                         if ((ex$i == best$i &&
+                              ex$supply_i == best$supply_i) ||
+                             (ex$j == best$i &&
+                              ex$supply_j == best$supply_i))
+                         {
+                              ex$recalculate()
+                         }
+                         
+                         if ((ex$j == best$j &&
+                              ex$supply_j == best$supply_j) ||
+                             (ex$i == best$j &&
+                              ex$supply_i == best$supply_j))
+                         {
+                              ex$recalculate()
+                         }
+                    }
+                    
+                    exchanges = nBest
+               }
           }
      }
-}
-
-# resultList = list()
-# 
-# for (exchange in realized)
-# {
-#      resultList = c(resultList, exchange$asList())
+     
+     resultMatrix = matrix(data = unlist(realized),
+                           byrow = TRUE,
+                           ncol = 14)
+     
+     write.table(
+          resultMatrix,
+          file = paste0("data/output/", filename, ".output.csv"),
+          row.names = FALSE,
+          na = "",
+          col.names = FALSE,
+          sep = ";"
+     )
 # }
-
-resultMatrix = matrix(data = unlist(realized),
-                      byrow = TRUE,
-                      ncol = 14)
-
-write.table(
-     resultMatrix,
-     file = paste0("data/output/", filename, ".output.csv"),
-     row.names = FALSE,
-     na = "",
-     col.names = FALSE,
-     sep = ";"
-)
-
 print("Finished...")
