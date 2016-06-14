@@ -77,6 +77,7 @@ ExchangePair = R6Class(
           eu_i = NA,
           eu_j = NA,
           gain = NA,
+          gain_check = FALSE,
           
           #booleans 
           recalc = FALSE,
@@ -121,11 +122,15 @@ ExchangePair = R6Class(
                self$exchangeRatioP()
                self$exchangeRatioQ()
                
-               #TODO: remove debug code 
-               #India	mrv	EU28	legal
-               if (self$i == "Russia" && self$j == "LDCs_BGD")
+               
+               
+               #
+               #AOSIS	amb2050
+               #EU28	adaptfinance
+               
+               if (self$i == "AOSIS" && self$j == "EU28" && self$q == "amb2050" && self$p == "adaptfinance")
                {
-                    # browser()
+                    #browser()
                }
                
                #compare the calculated shift with the maximum shift, if it exceeds, calculate with the maximum
@@ -171,8 +176,30 @@ ExchangePair = R6Class(
                else
                     self$gain = self$eu_i
                
-               self$yiq = self$model$xMatrix[self$supply_i, self$i] + self$move_i
+               
                self$yjp = self$model$xMatrix[self$supply_j, self$j] + self$move_j
+               self$yiq = self$model$xMatrix[self$supply_i, self$i] + self$move_i
+               
+               x = self$model$xMatrix[self$p,]
+               x[[self$j]] = self$yjp
+               nbs_p = self$model$nbs$adjusted(self$model$cMatrix[self$p,],self$model$sMatrix[self$p,],x)
+               
+               x = self$model$xMatrix[self$q,]
+               x[[self$i]] = self$yiq
+               
+               nbs_q = self$model$nbs$adjusted(self$model$cMatrix[self$q,],self$model$sMatrix[self$q,],x)
+               
+               shift_nbs_p = abs(self$model$nbs$nbsMatrix[self$p] - nbs_p)
+               shift_nbs_q = abs(self$model$nbs$nbsMatrix[self$q] - nbs_q)
+               
+               
+               
+               gain_j = as.numeric(shift_nbs_q * self$model$sMatrix[self$q,self$j] - shift_nbs_p * self$model$sMatrix[self$p,self$j])
+               gain_i = as.numeric(shift_nbs_p * self$model$sMatrix[self$p,self$i] - shift_nbs_q * self$model$sMatrix[self$q,self$i])
+               if (all.equal(gain_i, gain_j) == FALSE)
+                    stop("Unreachable state: gains are not equal.")
+               else
+                    self$gain_check = TRUE
                
                bMoveJ = self$model$hMatrix[[paste0(self$p, self$j)]]$isValidMove(self$move_j)
                bMoveI = self$model$hMatrix[[paste0(self$q, self$i)]]$isValidMove(self$move_i)
@@ -193,7 +220,7 @@ ExchangePair = R6Class(
                if (self$i == "Brazil" &&
                    self$q == "legal" && self$j == "EIG" && self$p == "mrv")
                {
-                    browser()
+                   # browser()
                }
                
                dsi = self$model$demandSupplyIssue
@@ -206,7 +233,7 @@ ExchangePair = R6Class(
                # wanneer mogen we door? is hij leeg is, of als hij supply is dus of b1 of b2
                
                # both are na or both are SUPPLY
-               if ( (is.na(b1) || b1 == TRUE) && (is.na(b3) || b3 == TRUE) )
+               if (1 == 1) #(is.na(b1) || b1 == TRUE) && (is.na(b3) || b3 == TRUE) )
                {
                     self$initPositionFromModel()
                     self$calculate()
@@ -302,7 +329,8 @@ ExchangePair = R6Class(
                     move_j,
                     yjp,
                     self$xip,
-                    self$recalc
+                    self$recalc,
+                    self$gain_check
                )
                
                return(l)
@@ -381,20 +409,26 @@ NBS <- R6Class(
                self$calculate(c, s, x)
           },
           isLeft = function(actor, issue) {
-               return(private$leftMatrix[issue, actor])
+               return(self$leftMatrix[issue, actor])
           },
           calculate = function(c, s, x) {
                # matrix calculation for the Nash Bargaining Solution
                #
                nbs = apply(c * s * x, 1, sum, na.rm = TRUE) / apply(c * s, 1, sum, na.rm = TRUE)
-               private$nbsMatrix = nbs
+               self$nbsMatrix = nbs
                
                # determine is all a position is left of the NBS
-               private$leftMatrix = nbs < x
-          }
+               self$leftMatrix = nbs < x
+          },
+          adjusted = function(c,s,x){
+               
+               return(sum(c * s * x, na.rm = TRUE) / sum(c*s,na.rm = TRUE))
+               
+          },
+          
+          nbsMatrix = NA,
+          leftMatrix = NA
      ),
-     private = list(nbsMatrix = NA,
-                    leftMatrix = NA)
 )
 
 EqualGainModel <- R6Class(
@@ -441,12 +475,17 @@ EqualGainModel <- R6Class(
                )
           },
           calculateNBS = function() {
-               return(NBS$new(self$cMatrix, self$sMatrix, self$xMatrix))
+               
+               self$nbs = NBS$new(self$cMatrix, self$sMatrix, self$xMatrix)
+               return(self$nbs)
           },
+          
+          nbs = NA,
+          
           calculatePairs = function() {
                pairs = list()
                
-               nbs = NBS$new(self$cMatrix, self$sMatrix, self$xMatrix)
+               self$nbs = NBS$new(self$cMatrix, self$sMatrix, self$xMatrix)
                
                actors = self$actors
                
@@ -462,8 +501,8 @@ EqualGainModel <- R6Class(
                     
                     for (actor in actors)
                     {
-                         issue1 = nbs$isLeft(actor, p)
-                         issue2 = nbs$isLeft(actor, q)
+                         issue1 = self$nbs$isLeft(actor, p)
+                         issue2 = self$nbs$isLeft(actor, q)
                          
                          if (!is.na(issue1) && !is.na(issue2))
                          {
@@ -737,7 +776,7 @@ model = p$parse()
      
      resultMatrix = matrix(data = unlist(realized),
                            byrow = TRUE,
-                           ncol = 14)
+                           ncol = 15)
      
      write.table(
           resultMatrix,
